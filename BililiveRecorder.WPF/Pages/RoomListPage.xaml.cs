@@ -40,7 +40,18 @@ namespace BililiveRecorder.WPF.Pages
         private void RoomListPage_DataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
         {
             if (e.OldValue is IRecorder data_old) ((INotifyCollectionChanged)data_old.Rooms).CollectionChanged -= this.DataSource_CollectionChanged;
-            if (e.NewValue is IRecorder data_new) ((INotifyCollectionChanged)data_new.Rooms).CollectionChanged += this.DataSource_CollectionChanged;
+            if (e.NewValue is IRecorder data_new)
+            {
+                ((INotifyCollectionChanged)data_new.Rooms).CollectionChanged += this.DataSource_CollectionChanged;
+                // 根据配置自动显示或隐藏日志
+                if (data_new.Config.Global.WpfShowLog)
+                {
+                    this.Splitter.Visibility = Visibility.Visible;
+                    this.LogElement.Visibility = Visibility.Visible;
+                    this.RoomListRowDefinition.Height = new GridLength(1, GridUnitType.Star);
+                    this.LogRowDefinition.Height = new GridLength(1, GridUnitType.Star);
+                }
+            }
             this.ApplySort();
         }
 
@@ -248,6 +259,8 @@ namespace BililiveRecorder.WPF.Pages
             this.LogElement.Visibility = Visibility.Visible;
             this.RoomListRowDefinition.Height = new GridLength(1, GridUnitType.Star);
             this.LogRowDefinition.Height = new GridLength(1, GridUnitType.Star);
+            if (this.DataContext is IRecorder rec)
+                rec.Config.Global.WpfShowLog = true;
         }
 
         private void MenuItem_HideLog_Click(object sender, RoutedEventArgs e)
@@ -256,6 +269,8 @@ namespace BililiveRecorder.WPF.Pages
             this.LogElement.Visibility = Visibility.Collapsed;
             this.RoomListRowDefinition.Height = new GridLength(1, GridUnitType.Star);
             this.LogRowDefinition.Height = new GridLength(0);
+            if (this.DataContext is IRecorder rec)
+                rec.Config.Global.WpfShowLog = false;
         }
 
         private void Log_ScrollViewer_Loaded(object sender, RoutedEventArgs e) => (sender as ScrollViewer)?.ScrollToEnd();

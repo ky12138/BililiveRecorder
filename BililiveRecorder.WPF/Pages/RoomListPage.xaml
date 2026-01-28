@@ -69,7 +69,7 @@
                     <Separator/>
                     <MenuItem Header="开播时弹出系统通知" IsCheckable="True" IsChecked="{Binding Config.Global.WpfNotifyStreamStart}"/>
                     <MenuItem Header="{l:Loc RoomListPage_Menu_View_ShowTitleAndAreaCheckBox}" IsCheckable="True" IsChecked="{Binding Config.Global.WpfShowTitleAndArea}"/>
-                    <MenuItem Header="{l:Loc RoomListPage_Menu_View_ShowLogCheckBox}" IsCheckable="True" Checked="MenuItem_ShowLog_Click" Unchecked="MenuItem_HideLog_Click"/>
+                    <MenuItem Header="{l:Loc RoomListPage_Menu_View_ShowLogCheckBox}" IsCheckable="True" IsChecked="{Binding Config.Global.WpfShowLog}" Checked="MenuItem_ShowLog_Click" Unchecked="MenuItem_HideLog_Click"/>
                 </MenuItem>
                 <MenuItem Header="{l:Loc RoomListPage_Menu_AutoRecord}">
                     <MenuItem Header="{l:Loc RoomListPage_Menu_AutoRecord_EnableAll}" Click="MenuItem_EnableAutoRecAll_Click"/>

@@ -158,6 +158,13 @@ export const data: Array<ConfigEntry> = [
         default: false
     },
     {
+        id: "WpfShowLog",
+        name: "桌面版默认显示日志",
+        type: "bool",
+        configType: "globalOnly",
+        default: true
+    },
+    {
         id: "Cookie",
         name: "Cookie",
         type: "string?",

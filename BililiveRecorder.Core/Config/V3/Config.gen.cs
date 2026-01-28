@@ -172,6 +172,11 @@ namespace BililiveRecorder.Core.Config.V3
         public bool WpfNotifyStreamStart => this.GetPropertyValue<bool>();
 
         /// <summary>
+        /// 桌面版默认显示日志
+        /// </summary>
+        public bool WpfShowLog => this.GetPropertyValue<bool>();
+
+        /// <summary>
         /// Cookie
         /// </summary>
         public string? Cookie => this.GetPropertyValue<string>();
@@ -412,6 +417,14 @@ namespace BililiveRecorder.Core.Config.V3
         public Optional<bool> OptionalWpfNotifyStreamStart { get => this.GetPropertyValueOptional<bool>(nameof(this.WpfNotifyStreamStart)); set => this.SetPropertyValueOptional(value, nameof(this.WpfNotifyStreamStart)); }
 
         /// <summary>
+        /// 桌面版默认显示日志
+        /// </summary>
+        public bool WpfShowLog { get => this.GetPropertyValue<bool>(); set => this.SetPropertyValue(value); }
+        public bool HasWpfShowLog { get => this.GetPropertyHasValue(nameof(this.WpfShowLog)); set => this.SetPropertyHasValue<bool>(value, nameof(this.WpfShowLog)); }
+        [JsonProperty(nameof(WpfShowLog)), EditorBrowsable(EditorBrowsableState.Never)]
+        public Optional<bool> OptionalWpfShowLog { get => this.GetPropertyValueOptional<bool>(nameof(this.WpfShowLog)); set => this.SetPropertyValueOptional(value, nameof(this.WpfShowLog)); }
+
+        /// <summary>
         /// Cookie
         /// </summary>
         public string? Cookie { get => this.GetPropertyValue<string>(); set => this.SetPropertyValue(value); }
@@ -577,6 +590,8 @@ namespace BililiveRecorder.Core.Config.V3
         public bool WpfShowTitleAndArea => true;
 
         public bool WpfNotifyStreamStart => false;
+
+        public bool WpfShowLog => true;
 
         public string Cookie => @"";
 
