@@ -27,7 +27,10 @@ namespace BililiveRecorder.Core.Recording
         private const string HttpHeaderUserAgent = Api.Http.HttpApiClient.HttpHeaderUserAgent;
 
         private const int timer_inverval = 2;
+        private const int qn_check_interval_seconds = 60; // 画质检测间隔（秒）
         protected readonly Timer timer = new Timer(1000 * timer_inverval);
+        private Timer? qnCheckTimer; // 画质检测定时器
+        private bool isUsingOriginalQuality = false; // 是否正在使用原画
         protected readonly Random random = new Random();
         protected readonly CancellationTokenSource cts = new CancellationTokenSource();
         protected readonly CancellationToken ct;
@@ -88,7 +91,99 @@ namespace BililiveRecorder.Core.Recording
 
         #endregion
 
-        public virtual void RequestStop() => this.cts.Cancel();
+        public virtual void RequestStop()
+        {
+            this.cts.Cancel();
+            this.StopQnCheckTimer();
+        }
+
+        /// <summary>
+        /// 启动画质检测定时器（当使用原画时）
+        /// </summary>
+        private void StartQnCheckTimer()
+        {
+            if (!this.isUsingOriginalQuality) return;
+
+            this.qnCheckTimer?.Dispose();
+            this.qnCheckTimer = new Timer(qn_check_interval_seconds * 1000d);
+            this.qnCheckTimer.Elapsed += this.QnCheckTimer_Elapsed;
+            this.qnCheckTimer.AutoReset = true;
+            this.qnCheckTimer.Start();
+            this.logger.Debug("启动画质检测定时器，每 {Interval} 秒检测一次", qn_check_interval_seconds);
+        }
+
+        /// <summary>
+        /// 停止画质检测定时器
+        /// </summary>
+        private void StopQnCheckTimer()
+        {
+            if (this.qnCheckTimer != null)
+            {
+                this.qnCheckTimer.Elapsed -= this.QnCheckTimer_Elapsed;
+                this.qnCheckTimer.Stop();
+                this.qnCheckTimer.Dispose();
+                this.qnCheckTimer = null;
+                this.logger.Debug("停止画质检测定时器");
+            }
+        }
+
+        /// <summary>
+        /// 画质检测定时器回调
+        /// </summary>
+        private void QnCheckTimer_Elapsed(object? sender, ElapsedEventArgs e)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (this.ct.IsCancellationRequested) return;
+
+                    this.logger.Debug("检测是否有低画质可用...");
+
+                    var allowedQn = ParseAllowedQn(this.room.RoomConfig.RecordingQuality);
+                    var codecItems = await this.apiClient.GetCodecItemInStreamUrlAsync(roomid: this.room.RoomConfig.RoomId, qn: OriginalQualityQn).ConfigureAwait(false);
+
+                    var allAvailableCodecQn = new List<StreamCodecQn>();
+                    if (codecItems.avc is not null)
+                    {
+                        allAvailableCodecQn.AddRange(codecItems.avc.AcceptQn.Select(x => new StreamCodecQn { Codec = StreamCodec.AVC, Qn = x }));
+                    }
+                    if (codecItems.hevc is not null)
+                    {
+                        allAvailableCodecQn.AddRange(codecItems.hevc.AcceptQn.Select(x => new StreamCodecQn { Codec = StreamCodec.HEVC, Qn = x }));
+                    }
+
+                    // 检查是否有设置中要求的画质可用
+                    foreach (var qn in allowedQn)
+                    {
+                        if (allAvailableCodecQn.Contains(qn))
+                        {
+                            // 找到可用的设置画质，且当前是原画，需要切换
+                            if (qn.Qn != OriginalQualityQn && this.qn == OriginalQualityQn)
+                            {
+                                this.logger.Information("检测到可用画质 {AvailableQn}，当前使用原画，准备切换画质", qn);
+                                this.StopQnCheckTimer();
+                                this.RequestStop(); // 停止当前录制，触发重新录制以切换画质
+                            }
+                            return;
+                        }
+                    }
+
+                    // 检查是否有低画质可用（设置中没有但低画质可用）
+                    var lowerQuality = TrySelectLowerQuality(allAvailableCodecQn);
+                    if (lowerQuality.Qn != 0)
+                    {
+                        this.logger.Information("检测到可用低画质 {LowerQn}，当前使用原画，准备切换画质", lowerQuality);
+                        this.StopQnCheckTimer();
+                        this.RequestStop(); // 停止当前录制，触发重新录制以切换画质
+                    }
+                }
+                catch (Exception ex)
+                {
+                    this.logger.Debug(ex, "画质检测时发生错误");
+                }
+            });
+        }
 
         public virtual void SplitOutput() { }
 
@@ -101,6 +196,7 @@ namespace BililiveRecorder.Core.Recording
             var (fullUrl, codecQn) = await this.FetchStreamUrlAsync(this.room.RoomConfig.RoomId).ConfigureAwait(false);
 
             this.qn = codecQn.Qn;
+            this.isUsingOriginalQuality = (this.qn == OriginalQualityQn);
             this.streamHost = new Uri(fullUrl).Host;
             var qnDesc = StreamQualityNumber.MapToString(codecQn.Qn);
 
@@ -111,6 +207,12 @@ namespace BililiveRecorder.Core.Recording
 
             this.ioStatsLastTrigger = DateTimeOffset.UtcNow;
             this.durationSinceNoDataReceived = TimeSpan.Zero;
+
+            // 如果使用原画，启动画质检测定时器
+            if (this.isUsingOriginalQuality)
+            {
+                this.StartQnCheckTimer();
+            }
 
             this.ct.Register(state => _ = Task.Run(async () =>
             {
@@ -281,6 +383,10 @@ namespace BililiveRecorder.Core.Recording
             return qns;
         }
 
+        // 低画质QN值列表（按优先级排序，数值越小画质越低）
+        private static readonly int[] LowQualityQns = new[] { 80, 250, 400 };
+        private const int OriginalQualityQn = 10000;
+
         protected async Task<(string url, StreamCodecQn codecQn)> FetchStreamUrlAsync(int roomid)
         {
             var allowedQn = ParseAllowedQn(this.room.RoomConfig.RecordingQuality);
@@ -326,8 +432,22 @@ namespace BililiveRecorder.Core.Recording
                 }
             }
 
-            this.logger.Information("没有符合设置要求的画质，稍后再试。设置画质 {QnSettings}, 可用画质 {AcceptQn}", allowedQn, allAvailableCodecQn);
-            throw new NoMatchingQnValueException();
+            // 没有符合设置要求的画质，尝试使用更低的可用画质
+            selectedCodecQn = TrySelectLowerQuality(allAvailableCodecQn);
+            
+            if (selectedCodecQn.Qn == 0)
+            {
+                // 没有低画质可用，默认使用原画
+                selectedCodecQn = TrySelectOriginalQuality(allAvailableCodecQn);
+            }
+
+            if (selectedCodecQn.Qn == 0)
+            {
+                this.logger.Information("没有符合设置要求的画质，稍后再试。设置画质 {QnSettings}, 可用画质 {AcceptQn}", allowedQn, allAvailableCodecQn);
+                throw new NoMatchingQnValueException();
+            }
+
+            this.logger.Information("设置画质 {QnSettings} 不可用，自动选择画质 {SelectedQn}", allowedQn, selectedCodecQn);
 
         match_qn_success:
             this.logger.Debug("设置画质 {QnSettings}, 可用画质 {AcceptQn}, 最终选择 {SelectedQn}", allowedQn, allAvailableCodecQn, selectedCodecQn);
@@ -365,6 +485,47 @@ namespace BililiveRecorder.Core.Recording
             var fullUrl = url_info.Host + item.BaseUrl + url_info.Extra;
 
             return (fullUrl, new StreamCodecQn { Codec = selectedCodecQn.Codec, Qn = item.CurrentQn });
+        }
+
+        /// <summary>
+        /// 尝试选择更低的可用画质（优先选择数值最小的）
+        /// </summary>
+        private static StreamCodecQn TrySelectLowerQuality(List<StreamCodecQn> allAvailableCodecQn)
+        {
+            // 按低画质QN列表的顺序（从低到高）查找可用画质
+            foreach (var lowQn in LowQualityQns)
+            {
+                var match = allAvailableCodecQn.FirstOrDefault(x => x.Qn == lowQn);
+                if (match.Qn != 0)
+                {
+                    return match;
+                }
+            }
+            return default;
+        }
+
+        /// <summary>
+        /// 尝试选择原画画质
+        /// </summary>
+        private static StreamCodecQn TrySelectOriginalQuality(List<StreamCodecQn> allAvailableCodecQn)
+        {
+            // 优先尝试AVC原画
+            var avcOriginal = allAvailableCodecQn.FirstOrDefault(x => x.Qn == OriginalQualityQn && x.Codec == StreamCodec.AVC);
+            if (avcOriginal.Qn != 0)
+            {
+                return avcOriginal;
+            }
+
+            // 其次尝试HEVC原画
+            var hevcOriginal = allAvailableCodecQn.FirstOrDefault(x => x.Qn == OriginalQualityQn && x.Codec == StreamCodec.HEVC);
+            if (hevcOriginal.Qn != 0)
+            {
+                return hevcOriginal;
+            }
+
+            // 最后尝试任何原画
+            var anyOriginal = allAvailableCodecQn.FirstOrDefault(x => x.Qn == OriginalQualityQn);
+            return anyOriginal;
         }
 
         protected async Task<Stream> GetStreamAsync(string fullUrl, int timeout)
